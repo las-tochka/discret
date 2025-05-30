@@ -1,0 +1,2 @@
+# discret
+Discrete Mathematics Coursework
