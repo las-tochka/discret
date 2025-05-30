@@ -1,9 +1,5 @@
 from flask import Flask, render_template, request
 import itertools
-import networkx as nx
-import matplotlib.pyplot as plt
-import io
-import base64
 
 app = Flask(__name__)
 
@@ -16,45 +12,88 @@ def is_externally_stable(graph, subset):
                 return False
     return True
 
+
+def filter_minimal_sets(sets):
+    minimal = []
+    for s in sets:
+        s_set = set(s)
+        if not any(set(other) < s_set for other in sets if set(other) != s_set):
+            minimal.append(s)
+    return minimal
+
+
 def find_minimal_externally_stable_sets(graph):
     n = len(graph)
     all_vertices = list(range(n))
-    min_size = n + 1
     result = []
 
     for r in range(1, n + 1):
         for subset in itertools.combinations(all_vertices, r):
             if is_externally_stable(graph, subset):
-                if len(subset) < min_size:
-                    min_size = len(subset)
-                    result = [subset]
-                elif len(subset) == min_size:
-                    result.append(subset)
-        if result:
-            break
-    return result
+                result.append(subset)
+
+    # Удалим перекрывающиеся (оставим только минимальные по включению)
+    return filter_minimal_sets(result)
+
 
 def draw_graph_image(matrix):
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    import io
+    import base64
+
     G = nx.DiGraph()
     size = len(matrix)
     for i in range(size):
         G.add_node(f'v{i+1}')
+
+    pos = nx.spring_layout(G, seed=42)
+    fig, ax = plt.subplots(figsize=(3.5, 3.5))
+
+    # Нарисуем вершины
+    nx.draw_networkx_nodes(G, pos, node_color='skyblue', node_size=600, ax=ax)
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=10)
+
+    # Для контроля повторных ребер
+    drawn_edges = set()
+
     for i in range(size):
         for j in range(size):
             if matrix[i][j] == 1:
-                G.add_edge(f'v{i+1}', f'v{j+1}')
+                u = f'v{i+1}'
+                v = f'v{j+1}'
+                if (v, u) in drawn_edges:
+                    # уже есть обратное ребро, рисуем с изогнутой траекторией
+                    nx.draw_networkx_edges(
+                        G, pos,
+                        edgelist=[(u, v)],
+                        arrowstyle='-|>', arrowsize=15,
+                        width=1.5,
+                        connectionstyle="arc3,rad=0.3",
+                        edge_color='black',
+                        ax=ax
+                    )
+                else:
+                    # обычная стрелка
+                    nx.draw_networkx_edges(
+                        G, pos,
+                        edgelist=[(u, v)],
+                        arrowstyle='-|>', arrowsize=15,
+                        width=1.5,
+                        connectionstyle="arc3,rad=0.0",
+                        edge_color='black',
+                        ax=ax
+                    )
+                drawn_edges.add((u, v))
 
-    pos = nx.spring_layout(G, seed=42)
-    fig, ax = plt.subplots(figsize=(3.5, 3.5))  # Уменьшено с ~5x5
-    nx.draw(G, pos, with_labels=True, node_color='skyblue', node_size=600,
-            font_size=10, arrows=True, ax=ax)
     plt.tight_layout()
-
     img = io.BytesIO()
-    plt.savefig(img, format='png', dpi=120)  # Можно выше DPI для четкости
+    plt.savefig(img, format='png', dpi=120)
     plt.close()
     img.seek(0)
     return base64.b64encode(img.read()).decode('utf-8')
+
+
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -79,8 +118,8 @@ def index():
 
         for subset in subsets:
             label = ', '.join([f"v{subscript(v + 1)}" for v in subset])
-            mapped = ', '.join([f"y{subscript(v + 1)}" for v in subset])
-            result.append(f"{{{label}}} соответствует {{{mapped}}}")
+            mapped = ' & '.join([f"y{subscript(v + 1)}" for v in subset])
+            result.append(f"{{{label}}} соответствует {mapped}")
 
         image_data = draw_graph_image(matrix)
     return render_template('index.html', result=result, size=size, matrix_data=matrix_data, image_data=image_data)
